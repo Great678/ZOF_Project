@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ZOF - Zero of Functions Solver</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 20px; max-width: 900px; }
+    label { display:block; margin-top:8px; }
+    input[type=text], select { width: 100%; padding:8px; }
+    .row { display:flex; gap:12px; }
+    .col { flex:1; }
+    table { border-collapse: collapse; width:100%; margin-top:12px; }
+    th, td { border:1px solid #ccc; padding:6px; text-align:right; }
+    th { background:#f0f0f0; }
+    .error { color: red; margin-top:12px; }
+    .result { background:#f7fff0; padding:10px; margin-top:12px; border:1px solid #d0e6b8;}
+  </style>
+</head>
+<body>
+  <h2>ZOF — Zero Of Functions Solver (Web GUI)</h2>
+  <form method="post">
+    <label>Method
+      <select name="method" required>
+        <option value="bisection">Bisection</option>
+        <option value="regula">Regula Falsi</option>
+        <option value="secant">Secant</option>
+        <option value="newton">Newton-Raphson</option>
+        <option value="fixed">Fixed Point Iteration</option>
+        <option value="modified">Modified Secant</option>
+      </select>
+    </label>
+
+    <label>f(x) — enter function in Python syntax (e.g. x**3 - 2*x - 5)
+      <input type="text" name="function" required placeholder="x**3 - 2*x - 5"/>
+    </label>
+
+    <div class="row">
+      <div class="col">
+        <label>a (left endpoint) <input type="text" name="a" placeholder="for bisection/regula" /></label>
+      </div>
+      <div class="col">
+        <label>b (right endpoint) <input type="text" name="b" placeholder="for bisection/regula" /></label>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <label>x0 <input type="text" name="x0" placeholder="initial guess x0" /></label>
+      </div>
+      <div class="col">
+        <label>x1 <input type="text" name="x1" placeholder="initial guess x1 (secant)" /></label>
+      </div>
+    </div>
+
+    <label>g(x) (for Fixed Point) <input type="text" name="g" placeholder="g(x) such that x = g(x)"/></label>
+
+    <div class="row">
+      <div class="col"><label>Delta (modified secant) <input type="text" name="delta" placeholder="1e-3" /></label></div>
+      <div class="col"><label>Tolerance <input type="text" name="tol" placeholder="1e-6" /></label></div>
+      <div class="col"><label>Max iterations <input type="text" name="max_iter" placeholder="50" /></label></div>
+    </div>
+
+    <button type="submit">Compute</button>
+  </form>
+
+  {% if error %}
+    <div class="error">{{ error }}</div>
+  {% endif %}
+
+  {% if result %}
+    <div class="result">
+      <strong>Method:</strong> {{ result.method }}<br/>
+      <strong>Estimated root:</strong> {{ result.root }}<br/>
+      {% if result.froot is defined %}<strong>f(root):</strong> {{ result.froot }}<br/>{% endif %}
+      <strong>Final error estimate:</strong> {{ result.err }}<br/>
+      <strong>Iterations:</strong> {{ result.nit }}
+    </div>
+
+    <h3>Iterations</h3>
+    <table>
+      <thead>
+        <tr>
+          {% for k in result.rows[0].keys() %}
+            <th>{{ k }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result.rows %}
+          <tr>
+            {% for v in row.values() %}
+              <td>{{ '%.10g'|format(v) if (v is number) else v }}</td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</body>
+</html>
