@@ -1,6 +1,4 @@
-Flask==3.0.3
-streamlit==1.39.0
-numpy==1.26.4
+Flask==3.0.0
 sympy==1.12
-pandas==2.1.1
+Werkzeug==3.0.1
 gunicorn==21.2.0

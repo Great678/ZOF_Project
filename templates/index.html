@@ -1,100 +1,339 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>ZOF - Zero of Functions Solver</title>
-  <style>
-    body { font-family: Arial, Helvetica, sans-serif; margin: 20px; max-width: 900px; }
-    label { display:block; margin-top:8px; }
-    input[type=text], select { width: 100%; padding:8px; }
-    .row { display:flex; gap:12px; }
-    .col { flex:1; }
-    table { border-collapse: collapse; width:100%; margin-top:12px; }
-    th, td { border:1px solid #ccc; padding:6px; text-align:right; }
-    th { background:#f0f0f0; }
-    .error { color: red; margin-top:12px; }
-    .result { background:#f7fff0; padding:10px; margin-top:12px; border:1px solid #d0e6b8;}
-  </style>
-</head>
-<body>
-  <h2>ZOF — Zero Of Functions Solver (Web GUI)</h2>
-  <form method="post">
-    <label>Method
-      <select name="method" required>
-        <option value="bisection">Bisection</option>
-        <option value="regula">Regula Falsi</option>
-        <option value="secant">Secant</option>
-        <option value="newton">Newton-Raphson</option>
-        <option value="fixed">Fixed Point Iteration</option>
-        <option value="modified">Modified Secant</option>
-      </select>
-    </label>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZOF Solver - Zero of Functions</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>🔢 Zero of Functions (ZOF) Solver</h1>
+        <p>Numerical Methods for Root Finding</p>
+      </header>
 
-    <label>f(x) — enter function in Python syntax (e.g. x**3 - 2*x - 5)
-      <input type="text" name="function" required placeholder="x**3 - 2*x - 5"/>
-    </label>
+      <div class="main-content">
+        <div class="input-section">
+          <h2>Input Parameters</h2>
 
-    <div class="row">
-      <div class="col">
-        <label>a (left endpoint) <input type="text" name="a" placeholder="for bisection/regula" /></label>
+          <!-- Method Selection -->
+          <div class="form-group">
+            <label for="method">Select Method:</label>
+            <select id="method" onchange="updateInputFields()">
+              <option value="bisection">Bisection Method</option>
+              <option value="regula_falsi">Regula Falsi Method</option>
+              <option value="secant">Secant Method</option>
+              <option value="newton_raphson">Newton-Raphson Method</option>
+              <option value="fixed_point">Fixed Point Iteration</option>
+              <option value="modified_secant">Modified Secant Method</option>
+            </select>
+          </div>
+
+          <!-- Function Input -->
+          <div class="form-group">
+            <label for="function">Function f(x):</label>
+            <input
+              type="text"
+              id="function"
+              placeholder="e.g., x**2 - 4 or sin(x) - x/2"
+            />
+            <small id="function-hint"
+              >Use Python syntax: ** for power, sin(), cos(), exp(), log(),
+              sqrt()</small
+            >
+          </div>
+
+          <!-- Dynamic Input Fields -->
+          <div id="dynamic-inputs">
+            <!-- Will be populated by JavaScript -->
+          </div>
+
+          <!-- Tolerance and Max Iterations -->
+          <div class="form-group">
+            <label for="tolerance">Tolerance:</label>
+            <input
+              type="number"
+              id="tolerance"
+              value="0.000001"
+              step="0.000001"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="max_iterations">Max Iterations:</label>
+            <input type="number" id="max_iterations" value="100" min="1" />
+          </div>
+
+          <button onclick="solveEquation()" class="btn-solve">Solve</button>
+          <button onclick="clearResults()" class="btn-clear">Clear</button>
+        </div>
+
+        <div class="output-section">
+          <h2>Results</h2>
+          <div id="loading" class="loading" style="display: none">
+            <div class="spinner"></div>
+            <p>Computing...</p>
+          </div>
+
+          <div
+            id="error-message"
+            class="error-message"
+            style="display: none"
+          ></div>
+
+          <div id="results" style="display: none">
+            <div class="result-summary">
+              <h3 id="method-name"></h3>
+              <div class="result-item">
+                <span class="label">Root:</span>
+                <span class="value" id="root-value"></span>
+              </div>
+              <div class="result-item">
+                <span class="label">Final Error:</span>
+                <span class="value" id="error-value"></span>
+              </div>
+              <div class="result-item">
+                <span class="label">Iterations:</span>
+                <span class="value" id="iterations-value"></span>
+              </div>
+              <div
+                id="warning-message"
+                class="warning-message"
+                style="display: none"
+              ></div>
+            </div>
+
+            <div class="iterations-table">
+              <h3>Iteration Details</h3>
+              <div class="table-wrapper">
+                <table id="iterations-data">
+                  <!-- Will be populated by JavaScript -->
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="col">
-        <label>b (right endpoint) <input type="text" name="b" placeholder="for bisection/regula" /></label>
-      </div>
+
+      <footer>
+        <p>ZOF Solver © 2025 | Numerical Methods Project</p>
+      </footer>
     </div>
 
-    <div class="row">
-      <div class="col">
-        <label>x0 <input type="text" name="x0" placeholder="initial guess x0" /></label>
-      </div>
-      <div class="col">
-        <label>x1 <input type="text" name="x1" placeholder="initial guess x1 (secant)" /></label>
-      </div>
-    </div>
+    <script>
+      // Update input fields based on selected method
+      function updateInputFields() {
+        const method = document.getElementById("method").value;
+        const dynamicInputs = document.getElementById("dynamic-inputs");
+        const functionHint = document.getElementById("function-hint");
 
-    <label>g(x) (for Fixed Point) <input type="text" name="g" placeholder="g(x) such that x = g(x)"/></label>
+        let html = "";
 
-    <div class="row">
-      <div class="col"><label>Delta (modified secant) <input type="text" name="delta" placeholder="1e-3" /></label></div>
-      <div class="col"><label>Tolerance <input type="text" name="tol" placeholder="1e-6" /></label></div>
-      <div class="col"><label>Max iterations <input type="text" name="max_iter" placeholder="50" /></label></div>
-    </div>
+        if (method === "bisection" || method === "regula_falsi") {
+          html = `
+                    <div class="form-group">
+                        <label for="a">Left Endpoint (a):</label>
+                        <input type="number" id="a" step="any" placeholder="e.g., 0">
+                    </div>
+                    <div class="form-group">
+                        <label for="b">Right Endpoint (b):</label>
+                        <input type="number" id="b" step="any" placeholder="e.g., 3">
+                    </div>
+                `;
+          functionHint.textContent =
+            "Use Python syntax: ** for power, sin(), cos(), exp(), log(), sqrt()";
+        } else if (method === "secant") {
+          html = `
+                    <div class="form-group">
+                        <label for="x0">First Initial Guess (x₀):</label>
+                        <input type="number" id="x0" step="any" placeholder="e.g., 1">
+                    </div>
+                    <div class="form-group">
+                        <label for="x1">Second Initial Guess (x₁):</label>
+                        <input type="number" id="x1" step="any" placeholder="e.g., 2">
+                    </div>
+                `;
+          functionHint.textContent =
+            "Use Python syntax: ** for power, sin(), cos(), exp(), log(), sqrt()";
+        } else if (method === "newton_raphson") {
+          html = `
+                    <div class="form-group">
+                        <label for="x0">Initial Guess (x₀):</label>
+                        <input type="number" id="x0" step="any" placeholder="e.g., 1">
+                    </div>
+                `;
+          functionHint.textContent =
+            "Derivative will be calculated automatically";
+        } else if (method === "fixed_point") {
+          html = `
+                    <div class="form-group">
+                        <label for="x0">Initial Guess (x₀):</label>
+                        <input type="number" id="x0" step="any" placeholder="e.g., 1">
+                    </div>
+                `;
+          functionHint.textContent =
+            "Enter g(x) where x = g(x). Example: for x² - 4 = 0, use sqrt(4) or (x + 4/x)/2";
+        } else if (method === "modified_secant") {
+          html = `
+                    <div class="form-group">
+                        <label for="x0">Initial Guess (x₀):</label>
+                        <input type="number" id="x0" step="any" placeholder="e.g., 1">
+                    </div>
+                    <div class="form-group">
+                        <label for="delta">Perturbation (δ):</label>
+                        <input type="number" id="delta" step="any" value="0.01" placeholder="e.g., 0.01">
+                    </div>
+                `;
+          functionHint.textContent =
+            "Use Python syntax: ** for power, sin(), cos(), exp(), log(), sqrt()";
+        }
 
-    <button type="submit">Compute</button>
-  </form>
+        dynamicInputs.innerHTML = html;
+      }
 
-  {% if error %}
-    <div class="error">{{ error }}</div>
-  {% endif %}
+      // Solve equation
+      async function solveEquation() {
+        const method = document.getElementById("method").value;
+        const func = document.getElementById("function").value;
+        const tolerance = document.getElementById("tolerance").value;
+        const maxIterations = document.getElementById("max_iterations").value;
 
-  {% if result %}
-    <div class="result">
-      <strong>Method:</strong> {{ result.method }}<br/>
-      <strong>Estimated root:</strong> {{ result.root }}<br/>
-      {% if result.froot is defined %}<strong>f(root):</strong> {{ result.froot }}<br/>{% endif %}
-      <strong>Final error estimate:</strong> {{ result.err }}<br/>
-      <strong>Iterations:</strong> {{ result.nit }}
-    </div>
+        if (!func) {
+          showError("Please enter a function");
+          return;
+        }
 
-    <h3>Iterations</h3>
-    <table>
-      <thead>
-        <tr>
-          {% for k in result.rows[0].keys() %}
-            <th>{{ k }}</th>
-          {% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in result.rows %}
-          <tr>
-            {% for v in row.values() %}
-              <td>{{ '%.10g'|format(v) if (v is number) else v }}</td>
-            {% endfor %}
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endif %}
-</body>
+        // Collect method-specific inputs
+        const data = {
+          method: method,
+          function: func,
+          tolerance: tolerance,
+          max_iterations: maxIterations,
+        };
+
+        if (method === "bisection" || method === "regula_falsi") {
+          data.a = document.getElementById("a").value;
+          data.b = document.getElementById("b").value;
+          if (!data.a || !data.b) {
+            showError("Please enter both endpoints");
+            return;
+          }
+        } else if (method === "secant") {
+          data.x0 = document.getElementById("x0").value;
+          data.x1 = document.getElementById("x1").value;
+          if (!data.x0 || !data.x1) {
+            showError("Please enter both initial guesses");
+            return;
+          }
+        } else if (method === "newton_raphson" || method === "fixed_point") {
+          data.x0 = document.getElementById("x0").value;
+          if (!data.x0) {
+            showError("Please enter initial guess");
+            return;
+          }
+        } else if (method === "modified_secant") {
+          data.x0 = document.getElementById("x0").value;
+          data.delta = document.getElementById("delta").value;
+          if (!data.x0) {
+            showError("Please enter initial guess");
+            return;
+          }
+        }
+
+        // Show loading
+        document.getElementById("loading").style.display = "block";
+        document.getElementById("results").style.display = "none";
+        document.getElementById("error-message").style.display = "none";
+
+        try {
+          const response = await fetch("/solve", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+          });
+
+          const result = await response.json();
+
+          document.getElementById("loading").style.display = "none";
+
+          if (result.error) {
+            showError(result.error);
+          } else {
+            displayResults(result);
+          }
+        } catch (error) {
+          document.getElementById("loading").style.display = "none";
+          showError("Error: " + error.message);
+        }
+      }
+
+      // Display results
+      function displayResults(result) {
+        document.getElementById("results").style.display = "block";
+        document.getElementById("method-name").textContent = result.method;
+        document.getElementById("root-value").textContent = result.root;
+        document.getElementById("error-value").textContent = result.final_error;
+        document.getElementById("iterations-value").textContent =
+          result.iterations;
+
+        // Show warning if exists
+        const warningDiv = document.getElementById("warning-message");
+        if (result.warning) {
+          warningDiv.textContent = "⚠️ " + result.warning;
+          warningDiv.style.display = "block";
+        } else {
+          warningDiv.style.display = "none";
+        }
+
+        // Display iteration data
+        if (result.iteration_data && result.iteration_data.length > 0) {
+          const table = document.getElementById("iterations-data");
+          const headers = Object.keys(result.iteration_data[0]);
+
+          let tableHTML = "<thead><tr>";
+          headers.forEach((header) => {
+            tableHTML += `<th>${header}</th>`;
+          });
+          tableHTML += "</tr></thead><tbody>";
+
+          result.iteration_data.forEach((row) => {
+            tableHTML += "<tr>";
+            headers.forEach((header) => {
+              tableHTML += `<td>${row[header]}</td>`;
+            });
+            tableHTML += "</tr>";
+          });
+
+          tableHTML += "</tbody>";
+          table.innerHTML = tableHTML;
+        }
+      }
+
+      // Show error message
+      function showError(message) {
+        const errorDiv = document.getElementById("error-message");
+        errorDiv.textContent = "❌ " + message;
+        errorDiv.style.display = "block";
+        document.getElementById("results").style.display = "none";
+      }
+
+      // Clear results
+      function clearResults() {
+        document.getElementById("results").style.display = "none";
+        document.getElementById("error-message").style.display = "none";
+        document.getElementById("loading").style.display = "none";
+      }
+
+      // Initialize on load
+      window.onload = function () {
+        updateInputFields();
+      };
+    </script>
+  </body>
 </html>

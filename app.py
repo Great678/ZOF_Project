@@ -1,171 +1,388 @@
-from flask import Flask, render_template, request, redirect, url_for
-import sympy as sp
+"""
+Zero of Functions (ZOF) Solver - Web Application
+Flask-based web interface for numerical root-finding methods
+"""
+
+from flask import Flask, render_template, request, jsonify
 import math
+import sympy as sp
+from typing import Dict
 
 app = Flask(__name__)
 
-# Helpers (similar to CLI)
-def make_function(func_str):
-    x = sp.symbols('x')
-    expr = sp.sympify(func_str)
-    f = sp.lambdify(x, expr, modules=["math"])
-    return f, expr
 
-def derivative_of(expr):
-    x = sp.symbols('x')
-    dexpr = sp.diff(expr, x)
-    return sp.lambdify(x, dexpr, modules=["math"]), dexpr
-
-# Methods (same logic but returns serializable rows)
-def bisection(f, a, b, tol, max_iter):
-    fa = f(a); fb = f(b)
-    if fa * fb > 0:
-        raise ValueError("f(a) and f(b) must have opposite signs.")
-    rows = []
-    for k in range(1, max_iter+1):
-        c = (a+b)/2
-        fc = f(c)
-        err = abs(b-a)/2
-        rows.append({'k':k,'a':a,'b':b,'c':c,'fa':fa,'fb':fb,'fc':fc,'err':err})
-        if abs(fc) < tol or err < tol:
-            return rows, c, fc, err, k
-        if fa * fc < 0:
-            b = c; fb = fc
-        else:
-            a = c; fa = fc
-    return rows, c, fc, err, k
-
-def regula_falsi(f,a,b,tol,max_iter):
-    fa = f(a); fb = f(b)
-    if fa * fb > 0:
-        raise ValueError("f(a) and f(b) must have opposite signs.")
-    rows = []
-    c = a
-    for k in range(1, max_iter+1):
-        c_prev = c
-        c = (a*fb - b*fa)/(fb - fa)
-        fc = f(c)
-        err = abs(c - c_prev) if k>1 else abs(b-a)
-        rows.append({'k':k,'a':a,'b':b,'c':c,'fa':fa,'fb':fb,'fc':fc,'err':err})
-        if abs(fc) < tol or err < tol:
-            return rows, c, fc, err, k
-        if fa * fc < 0:
-            b = c; fb = fc
-        else:
-            a = c; fa = fc
-    return rows, c, fc, err, k
-
-def secant(f,x0,x1,tol,max_iter):
-    rows=[]
-    f0=f(x0); f1=f(x1)
-    for k in range(1,max_iter+1):
-        if (f1 - f0)==0:
-            raise ZeroDivisionError("Zero denominator in Secant")
-        x2 = x1 - f1*(x1-x0)/(f1-f0)
-        f2 = f(x2)
-        err = abs(x2 - x1)
-        rows.append({'k':k,'x0':x0,'x1':x1,'x2':x2,'f0':f0,'f1':f1,'f2':f2,'err':err})
-        if abs(f2) < tol or err < tol:
-            return rows, x2, f2, err, k
-        x0,f0 = x1,f1
-        x1,f1 = x2,f2
-    return rows, x2, f2, err, k
-
-def newton_raphson(f, fprime_callable, x0, tol, max_iter):
-    rows=[]
-    x=x0; fx=f(x)
-    for k in range(1,max_iter+1):
-        fpx = fprime_callable(x)
-        if fpx == 0:
-            raise ZeroDivisionError("Derivative zero.")
-        x_new = x - fx/fpx
-        fx_new = f(x_new)
-        err = abs(x_new - x)
-        rows.append({'k':k,'x':x,'x_new':x_new,'fx':fx,'fpx':fpx,'fx_new':fx_new,'err':err})
-        if abs(fx_new) < tol or err < tol:
-            return rows, x_new, fx_new, err, k
-        x,fx = x_new,fx_new
-    return rows, x_new, fx_new, err, k
-
-def fixed_point_iteration(g,x0,tol,max_iter):
-    rows=[]
-    x=x0
-    for k in range(1,max_iter+1):
-        x_new = g(x)
-        err = abs(x_new - x)
-        rows.append({'k':k,'x':x,'g_x':x_new,'err':err})
-        if err < tol:
-            return rows, x_new, err, k
-        x = x_new
-    return rows, x_new, err, k
-
-def modified_secant(f,x0,delta,tol,max_iter):
-    rows=[]
-    x=x0
-    for k in range(1,max_iter+1):
-        denom = f(x + delta*x) - f(x)
-        if denom == 0:
-            raise ZeroDivisionError("Denominator zero in modified secant")
-        x_new = x - (delta*x)*f(x)/denom
-        fnew = f(x_new)
-        err = abs(x_new - x)
-        rows.append({'k':k,'x':x,'x_new':x_new,'fx':f(x),'fxdx':f(x+delta*x),'fnew':fnew,'err':err})
-        if abs(fnew) < tol or err < tol:
-            return rows, x_new, fnew, err, k
-        x = x_new
-    return rows, x_new, fnew, err, k
-
-@app.route("/", methods=["GET","POST"])
-def index():
-    result = None
-    error = None
-    if request.method == "POST":
-        method = request.form.get("method")
-        func_str = request.form.get("function", "").strip()
-        tol = float(request.form.get("tol") or 1e-6)
-        max_iter = int(request.form.get("max_iter") or 50)
+class ZOFSolver:
+    """Class implementing six root-finding numerical methods"""
+    
+    def __init__(self):
+        self.x = sp.Symbol('x')
+        self.iteration_data = []
+    
+    def parse_function(self, func_str: str):
+        """Parse string function to callable"""
         try:
-            f, expr = make_function(func_str)
+            expr = sp.sympify(func_str)
+            func = sp.lambdify(self.x, expr, 'math')
+            return func, expr
         except Exception as e:
-            error = f"Error parsing f(x): {e}"
-            return render_template("index.html", error=error)
-        try:
-            if method == "bisection":
-                a = float(request.form.get("a"))
-                b = float(request.form.get("b"))
-                rows, root, froot, err, nit = bisection(f,a,b,tol,max_iter)
-                result = {'rows':rows, 'root':root, 'froot':froot, 'err':err, 'nit':nit, 'method':'Bisection'}
-            elif method == "regula":
-                a = float(request.form.get("a"))
-                b = float(request.form.get("b"))
-                rows, root, froot, err, nit = regula_falsi(f,a,b,tol,max_iter)
-                result = {'rows':rows, 'root':root, 'froot':froot, 'err':err, 'nit':nit, 'method':'Regula Falsi'}
-            elif method == "secant":
-                x0 = float(request.form.get("x0"))
-                x1 = float(request.form.get("x1"))
-                rows, root, froot, err, nit = secant(f,x0,x1,tol,max_iter)
-                result = {'rows':rows, 'root':root, 'froot':froot, 'err':err, 'nit':nit, 'method':'Secant'}
-            elif method == "newton":
-                fprime_callable, dexpr = derivative_of(expr)
-                x0 = float(request.form.get("x0"))
-                rows, root, froot, err, nit = newton_raphson(f, fprime_callable, x0, tol, max_iter)
-                result = {'rows':rows, 'root':root, 'froot':froot, 'err':err, 'nit':nit, 'method':'Newton-Raphson'}
-            elif method == "fixed":
-                g_str = request.form.get("g")
-                g, _ = make_function(g_str)
-                x0 = float(request.form.get("x0"))
-                rows, root, err, nit = fixed_point_iteration(g,x0,tol,max_iter)
-                result = {'rows':rows, 'root':root, 'err':err, 'nit':nit, 'method':'Fixed Point'}
-            elif method == "modified":
-                x0 = float(request.form.get("x0"))
-                delta = float(request.form.get("delta") or 1e-3)
-                rows, root, froot, err, nit = modified_secant(f,x0,delta,tol,max_iter)
-                result = {'rows':rows, 'root':root, 'froot':froot, 'err':err, 'nit':nit, 'method':'Modified Secant'}
+            raise ValueError(f"Error parsing function: {e}")
+    
+    def bisection_method(self, func_str: str, a: float, b: float, 
+                        tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """Bisection Method"""
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        fa = func(a)
+        fb = func(b)
+        
+        if fa * fb > 0:
+            return {"error": "Function must have opposite signs at endpoints"}
+        
+        for i in range(1, max_iter + 1):
+            c = (a + b) / 2
+            fc = func(c)
+            error = abs(b - a) / 2
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "a": round(a, 10),
+                "b": round(b, 10),
+                "c": round(c, 10),
+                "f(c)": round(fc, 10),
+                "error": f"{error:.6e}"
+            })
+            
+            if abs(fc) < tol or error < tol:
+                return {
+                    "root": round(c, 10),
+                    "iterations": i,
+                    "final_error": f"{error:.6e}",
+                    "iteration_data": self.iteration_data,
+                    "method": "Bisection Method"
+                }
+            
+            if fa * fc < 0:
+                b = c
+                fb = fc
             else:
-                error = "Unknown method selected."
-        except Exception as e:
-            error = f"Method failed: {e}"
-    return render_template("index.html", result=result, error=error)
+                a = c
+                fa = fc
+        
+        return {
+            "root": round(c, 10),
+            "iterations": max_iter,
+            "final_error": f"{error:.6e}",
+            "iteration_data": self.iteration_data,
+            "method": "Bisection Method",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def regula_falsi_method(self, func_str: str, a: float, b: float, 
+                           tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """Regula Falsi Method"""
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        fa = func(a)
+        fb = func(b)
+        
+        if fa * fb > 0:
+            return {"error": "Function must have opposite signs at endpoints"}
+        
+        c_old = a
+        
+        for i in range(1, max_iter + 1):
+            c = b - (fb * (b - a)) / (fb - fa)
+            fc = func(c)
+            
+            if i > 1:
+                error = abs(c - c_old)
+            else:
+                error = abs(b - a)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "a": round(a, 10),
+                "b": round(b, 10),
+                "c": round(c, 10),
+                "f(c)": round(fc, 10),
+                "error": f"{error:.6e}"
+            })
+            
+            if abs(fc) < tol or error < tol:
+                return {
+                    "root": round(c, 10),
+                    "iterations": i,
+                    "final_error": f"{error:.6e}",
+                    "iteration_data": self.iteration_data,
+                    "method": "Regula Falsi Method"
+                }
+            
+            if fa * fc < 0:
+                b = c
+                fb = fc
+            else:
+                a = c
+                fa = fc
+            
+            c_old = c
+        
+        return {
+            "root": round(c, 10),
+            "iterations": max_iter,
+            "final_error": f"{error:.6e}",
+            "iteration_data": self.iteration_data,
+            "method": "Regula Falsi Method",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def secant_method(self, func_str: str, x0: float, x1: float, 
+                     tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """Secant Method"""
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        f0 = func(x0)
+        f1 = func(x1)
+        
+        for i in range(1, max_iter + 1):
+            if abs(f1 - f0) < 1e-12:
+                return {"error": "Division by zero: f(x1) - f(x0) too small"}
+            
+            x2 = x1 - f1 * (x1 - x0) / (f1 - f0)
+            f2 = func(x2)
+            error = abs(x2 - x1)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "x0": round(x0, 10),
+                "x1": round(x1, 10),
+                "x2": round(x2, 10),
+                "f(x2)": round(f2, 10),
+                "error": f"{error:.6e}"
+            })
+            
+            if abs(f2) < tol or error < tol:
+                return {
+                    "root": round(x2, 10),
+                    "iterations": i,
+                    "final_error": f"{error:.6e}",
+                    "iteration_data": self.iteration_data,
+                    "method": "Secant Method"
+                }
+            
+            x0, f0 = x1, f1
+            x1, f1 = x2, f2
+        
+        return {
+            "root": round(x2, 10),
+            "iterations": max_iter,
+            "final_error": f"{error:.6e}",
+            "iteration_data": self.iteration_data,
+            "method": "Secant Method",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def newton_raphson_method(self, func_str: str, x0: float, 
+                             tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """Newton-Raphson Method"""
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        derivative_expr = sp.diff(expr, self.x)
+        derivative = sp.lambdify(self.x, derivative_expr, 'math')
+        
+        x = x0
+        
+        for i in range(1, max_iter + 1):
+            fx = func(x)
+            dfx = derivative(x)
+            
+            if abs(dfx) < 1e-12:
+                return {"error": "Derivative too small, division by zero"}
+            
+            x_new = x - fx / dfx
+            error = abs(x_new - x)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "x": round(x, 10),
+                "f(x)": round(fx, 10),
+                "f'(x)": round(dfx, 10),
+                "x_new": round(x_new, 10),
+                "error": f"{error:.6e}"
+            })
+            
+            if abs(func(x_new)) < tol or error < tol:
+                return {
+                    "root": round(x_new, 10),
+                    "iterations": i,
+                    "final_error": f"{error:.6e}",
+                    "iteration_data": self.iteration_data,
+                    "method": "Newton-Raphson Method"
+                }
+            
+            x = x_new
+        
+        return {
+            "root": round(x, 10),
+            "iterations": max_iter,
+            "final_error": f"{error:.6e}",
+            "iteration_data": self.iteration_data,
+            "method": "Newton-Raphson Method",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def fixed_point_iteration(self, func_str: str, x0: float, 
+                             tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """Fixed Point Iteration"""
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        x = x0
+        
+        for i in range(1, max_iter + 1):
+            x_new = func(x)
+            error = abs(x_new - x)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "x": round(x, 10),
+                "g(x)": round(x_new, 10),
+                "error": f"{error:.6e}"
+            })
+            
+            if error < tol:
+                return {
+                    "root": round(x_new, 10),
+                    "iterations": i,
+                    "final_error": f"{error:.6e}",
+                    "iteration_data": self.iteration_data,
+                    "method": "Fixed Point Iteration"
+                }
+            
+            if abs(x_new) > 1e10:
+                return {"error": "Method diverging, |x| > 10^10"}
+            
+            x = x_new
+        
+        return {
+            "root": round(x, 10),
+            "iterations": max_iter,
+            "final_error": f"{error:.6e}",
+            "iteration_data": self.iteration_data,
+            "method": "Fixed Point Iteration",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def modified_secant_method(self, func_str: str, x0: float, delta: float = 0.01, 
+                               tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """Modified Secant Method"""
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        x = x0
+        
+        for i in range(1, max_iter + 1):
+            fx = func(x)
+            fx_delta = func(x + delta * x) if x != 0 else func(x + delta)
+            
+            denominator = fx_delta - fx
+            if abs(denominator) < 1e-12:
+                return {"error": "Division by zero: f(x + δx) - f(x) too small"}
+            
+            x_new = x - fx * (delta * x if x != 0 else delta) / denominator
+            error = abs(x_new - x)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "x": round(x, 10),
+                "f(x)": round(fx, 10),
+                "f(x+δx)": round(fx_delta, 10),
+                "x_new": round(x_new, 10),
+                "error": f"{error:.6e}"
+            })
+            
+            if abs(func(x_new)) < tol or error < tol:
+                return {
+                    "root": round(x_new, 10),
+                    "iterations": i,
+                    "final_error": f"{error:.6e}",
+                    "iteration_data": self.iteration_data,
+                    "method": "Modified Secant Method"
+                }
+            
+            x = x_new
+        
+        return {
+            "root": round(x, 10),
+            "iterations": max_iter,
+            "final_error": f"{error:.6e}",
+            "iteration_data": self.iteration_data,
+            "method": "Modified Secant Method",
+            "warning": "Maximum iterations reached"
+        }
 
-if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+
+# Initialize solver
+solver = ZOFSolver()
+
+
+@app.route('/')
+def index():
+    """Render the main page"""
+    return render_template('index.html')
+
+
+@app.route('/solve', methods=['POST'])
+def solve():
+    """Handle solve requests"""
+    try:
+        data = request.json
+        method = data.get('method')
+        func_str = data.get('function')
+        tol = float(data.get('tolerance', 1e-6))
+        max_iter = int(data.get('max_iterations', 100))
+        
+        result = {}
+        
+        if method == 'bisection':
+            a = float(data.get('a'))
+            b = float(data.get('b'))
+            result = solver.bisection_method(func_str, a, b, tol, max_iter)
+        
+        elif method == 'regula_falsi':
+            a = float(data.get('a'))
+            b = float(data.get('b'))
+            result = solver.regula_falsi_method(func_str, a, b, tol, max_iter)
+        
+        elif method == 'secant':
+            x0 = float(data.get('x0'))
+            x1 = float(data.get('x1'))
+            result = solver.secant_method(func_str, x0, x1, tol, max_iter)
+        
+        elif method == 'newton_raphson':
+            x0 = float(data.get('x0'))
+            result = solver.newton_raphson_method(func_str, x0, tol, max_iter)
+        
+        elif method == 'fixed_point':
+            x0 = float(data.get('x0'))
+            result = solver.fixed_point_iteration(func_str, x0, tol, max_iter)
+        
+        elif method == 'modified_secant':
+            x0 = float(data.get('x0'))
+            delta = float(data.get('delta', 0.01))
+            result = solver.modified_secant_method(func_str, x0, delta, tol, max_iter)
+        
+        else:
+            result = {"error": "Invalid method selected"}
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5001)

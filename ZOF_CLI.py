@@ -1,285 +1,482 @@
 #!/usr/bin/env python3
 """
-ZOF_CLI.py
-Zero Of Functions (ZOF) Solver - CLI
-Supports: Bisection, Regula Falsi, Secant, Newton-Raphson, Fixed Point, Modified Secant
-
-Usage:
-    python ZOF_CLI.py
-It will launch an interactive menu asking for function, method and parameters.
-
-Notes:
-- You may enter functions like: x**3 - 2*x - 5
-- For Fixed Point method, provide g(x) such that x = g(x).
-- Tolerance is used for |f(x)| (or |x_new - x_old| depending on method).
+Zero of Functions (ZOF) Solver - Command Line Interface
+Implements six numerical methods for finding roots of nonlinear equations
 """
-import sys
+
 import math
-from typing import Callable, Tuple, List, Any
-try:
-    import sympy as sp
-except Exception as e:
-    print("Sympy not found. Please install requirements from requirements.txt (sympy).")
-    raise
+import sympy as sp
+from typing import Callable, List, Dict, Tuple
 
-# ----- Utility: parse function strings to callable -----
-def make_function(func_str: str) -> Tuple[Callable[[float], float], Any]:
-    """
-    Returns (f, sympy_expr)
-    """
-    x = sp.symbols('x')
-    expr = sp.sympify(func_str)
-    f = sp.lambdify(x, expr, modules=["math"])
-    return f, expr
 
-def derivative_of(expr):
-    x = sp.symbols('x')
-    dexpr = sp.diff(expr, x)
-    return sp.lambdify(x, dexpr, modules=["math"]), dexpr
-
-# ----- Methods implementations (return iteration list and final info) -----
-def bisection(f, a: float, b: float, tol: float, max_iter: int):
-    iters = []
-    fa = f(a); fb = f(b)
-    if fa * fb > 0:
-        raise ValueError("Function has same sign at interval endpoints. Bisection requires sign change.")
-    for k in range(1, max_iter+1):
-        c = (a + b) / 2.0
-        fc = f(c)
-        # error estimate: half interval width
-        err = abs(b - a) / 2.0
-        iters.append((k, a, b, c, fa, fb, fc, err))
-        if abs(fc) < tol or err < tol:
-            return iters, c, fc, err, k
-        if fa * fc < 0:
-            b = c
-            fb = fc
-        else:
-            a = c
-            fa = fc
-    return iters, c, fc, err, k
-
-def regula_falsi(f, a: float, b: float, tol: float, max_iter: int):
-    iters = []
-    fa = f(a); fb = f(b)
-    if fa * fb > 0:
-        raise ValueError("Function has same sign at interval endpoints. Regula Falsi requires sign change.")
-    c = a
-    for k in range(1, max_iter+1):
-        c_prev = c
-        c = (a * fb - b * fa) / (fb - fa)
-        fc = f(c)
-        err = abs(c - c_prev) if k > 1 else abs(b - a)
-        iters.append((k, a, b, c, fa, fb, fc, err))
-        if abs(fc) < tol or err < tol:
-            return iters, c, fc, err, k
-        if fa * fc < 0:
-            b = c
-            fb = fc
-        else:
-            a = c
-            fa = fc
-    return iters, c, fc, err, k
-
-def secant(f, x0: float, x1: float, tol: float, max_iter: int):
-    iters = []
-    f0 = f(x0); f1 = f(x1)
-    for k in range(1, max_iter+1):
-        if (f1 - f0) == 0:
-            raise ZeroDivisionError("Denominator became zero in Secant method.")
-        x2 = x1 - f1 * (x1 - x0) / (f1 - f0)
-        f2 = f(x2)
-        err = abs(x2 - x1)
-        iters.append((k, x0, x1, x2, f0, f1, f2, err))
-        if abs(f2) < tol or err < tol:
-            return iters, x2, f2, err, k
-        x0, f0 = x1, f1
-        x1, f1 = x2, f2
-    return iters, x2, f2, err, k
-
-def newton_raphson(f, fprime_callable, x0: float, tol: float, max_iter: int):
-    iters = []
-    x = x0
-    fx = f(x)
-    for k in range(1, max_iter+1):
-        fpx = fprime_callable(x)
-        if fpx == 0:
-            raise ZeroDivisionError("Derivative zero during Newton-Raphson.")
-        x_new = x - fx / fpx
-        fx_new = f(x_new)
-        err = abs(x_new - x)
-        iters.append((k, x, x_new, fx, fpx, fx_new, err))
-        if abs(fx_new) < tol or err < tol:
-            return iters, x_new, fx_new, err, k
-        x, fx = x_new, fx_new
-    return iters, x_new, fx_new, err, k
-
-def fixed_point_iteration(g, x0: float, tol: float, max_iter: int):
-    iters = []
-    x = x0
-    for k in range(1, max_iter+1):
-        x_new = g(x)
-        err = abs(x_new - x)
-        fx_new = None  # Not known unless user also supplies f
-        iters.append((k, x, x_new, err))
-        if err < tol:
-            return iters, x_new, err, k
-        x = x_new
-    return iters, x_new, err, k
-
-def modified_secant(f, x0: float, delta: float, tol: float, max_iter: int):
-    iters = []
-    x = x0
-    for k in range(1, max_iter+1):
-        denom = f(x + delta * x) - f(x)
-        if denom == 0:
-            raise ZeroDivisionError("Denominator zero in Modified Secant.")
-        x_new = x - (delta * x) * f(x) / denom
-        f_new = f(x_new)
-        err = abs(x_new - x)
-        iters.append((k, x, x_new, f(x), f(x + delta * x), f_new, err))
-        if abs(f_new) < tol or err < tol:
-            return iters, x_new, f_new, err, k
-        x = x_new
-    return iters, x_new, f_new, err, k
-
-# ----- CLI helpers -----
-def float_input(prompt, default=None):
-    while True:
+class ZOFSolver:
+    """Class implementing six root-finding numerical methods"""
+    
+    def __init__(self):
+        self.x = sp.Symbol('x')
+        self.iteration_data = []
+    
+    def parse_function(self, func_str: str) -> Callable:
+        """Parse string function to callable"""
         try:
-            s = input(prompt).strip()
-            if s == "" and default is not None:
-                return default
-            return float(s)
-        except ValueError:
-            print("Enter a valid number.")
-
-def int_input(prompt, default=None):
-    while True:
-        try:
-            s = input(prompt).strip()
-            if s == "" and default is not None:
-                return default
-            return int(s)
-        except ValueError:
-            print("Enter an integer.")
-
-def main_menu():
-    print("\nZOF Solver - CLI")
-    print("Choose method:")
-    print("1. Bisection")
-    print("2. Regula Falsi (False Position)")
-    print("3. Secant")
-    print("4. Newton-Raphson")
-    print("5. Fixed Point Iteration")
-    print("6. Modified Secant")
-    print("0. Exit")
-    choice = input("Enter choice (0-6): ").strip()
-    return choice
-
-def print_bisection_table(iters):
-    print(f"{'k':>3} {'a':>12} {'b':>12} {'c':>12} {'f(a)':>12} {'f(b)':>12} {'f(c)':>12} {'err':>12}")
-    for row in iters:
-        k,a,b,c,fa,fb,fc,err = row
-        print(f"{k:3d} {a:12.6g} {b:12.6g} {c:12.6g} {fa:12.6g} {fb:12.6g} {fc:12.6g} {err:12.6g}")
-
-def print_regula_table(iters):
-    print_bisection_table(iters)
-
-def print_secant_table(iters):
-    print(f"{'k':>3} {'x_{k-2}':>12} {'x_{k-1}':>12} {'x_k':>12} {'f(x_{k-2})':>12} {'f(x_{k-1})':>12} {'f(x_k)':>12} {'err':>12}")
-    for row in iters:
-        k,x0,x1,x2,f0,f1,f2,err = row
-        print(f"{k:3d} {x0:12.6g} {x1:12.6g} {x2:12.6g} {f0:12.6g} {f1:12.6g} {f2:12.6g} {err:12.6g}")
-
-def print_newton_table(iters):
-    print(f"{'k':>3} {'x':>12} {'x_new':>12} {'f(x)':>12} {'f\'(x)':>12} {'f(x_new)':>12} {'err':>12}")
-    for row in iters:
-        k,x,x_new,fx,fpx,fx_new,err = row
-        print(f"{k:3d} {x:12.6g} {x_new:12.6g} {fx:12.6g} {fpx:12.6g} {fx_new:12.6g} {err:12.6g}")
-
-def print_fixed_table(iters):
-    print(f"{'k':>3} {'x':>12} {'g(x)':>12} {'err':>12}")
-    for row in iters:
-        k,x,x_new,err = row
-        print(f"{k:3d} {x:12.6g} {x_new:12.6g} {err:12.6g}")
-
-def print_modified_secant_table(iters):
-    print(f"{'k':>3} {'x':>12} {'x_new':>12} {'f(x)':>12} {'f(x+dx)':>12} {'f(x_new)':>12} {'err':>12}")
-    for row in iters:
-        k,x,x_new,fx,fxdx,fn,err = row
-        print(f"{k:3d} {x:12.6g} {x_new:12.6g} {fx:12.6g} {fxdx:12.6g} {fn:12.6g} {err:12.6g}")
-
-def run_cli():
-    while True:
-        choice = main_menu()
-        if choice == '0':
-            print("Goodbye.")
-            break
-        if choice not in [str(i) for i in range(1,7)]:
-            print("Invalid choice.")
-            continue
-
-        func_str = input("Enter f(x) (e.g. x**3 - 2*x - 5): ").strip()
-        try:
-            f, expr = make_function(func_str)
+            expr = sp.sympify(func_str)
+            func = sp.lambdify(self.x, expr, 'math')
+            return func, expr
         except Exception as e:
-            print("Error parsing function:", e)
-            continue
+            raise ValueError(f"Error parsing function: {e}")
+    
+    def bisection_method(self, func_str: str, a: float, b: float, 
+                        tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """
+        Bisection Method: Repeatedly bisects interval and selects subinterval 
+        where sign change occurs
+        """
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        fa = func(a)
+        fb = func(b)
+        
+        if fa * fb > 0:
+            return {"error": "Function must have opposite signs at endpoints"}
+        
+        for i in range(1, max_iter + 1):
+            c = (a + b) / 2
+            fc = func(c)
+            error = abs(b - a) / 2
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "a": a,
+                "b": b,
+                "c": c,
+                "f(c)": fc,
+                "error": error
+            })
+            
+            if abs(fc) < tol or error < tol:
+                return {
+                    "root": c,
+                    "iterations": i,
+                    "final_error": error,
+                    "iteration_data": self.iteration_data,
+                    "method": "Bisection Method"
+                }
+            
+            if fa * fc < 0:
+                b = c
+                fb = fc
+            else:
+                a = c
+                fa = fc
+        
+        return {
+            "root": c,
+            "iterations": max_iter,
+            "final_error": error,
+            "iteration_data": self.iteration_data,
+            "method": "Bisection Method",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def regula_falsi_method(self, func_str: str, a: float, b: float, 
+                           tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """
+        Regula Falsi (False Position) Method: Uses weighted average based on 
+        function values instead of midpoint
+        """
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        fa = func(a)
+        fb = func(b)
+        
+        if fa * fb > 0:
+            return {"error": "Function must have opposite signs at endpoints"}
+        
+        c_old = a
+        
+        for i in range(1, max_iter + 1):
+            c = b - (fb * (b - a)) / (fb - fa)
+            fc = func(c)
+            
+            if i > 1:
+                error = abs(c - c_old)
+            else:
+                error = abs(b - a)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "a": a,
+                "b": b,
+                "c": c,
+                "f(c)": fc,
+                "error": error
+            })
+            
+            if abs(fc) < tol or error < tol:
+                return {
+                    "root": c,
+                    "iterations": i,
+                    "final_error": error,
+                    "iteration_data": self.iteration_data,
+                    "method": "Regula Falsi Method"
+                }
+            
+            if fa * fc < 0:
+                b = c
+                fb = fc
+            else:
+                a = c
+                fa = fc
+            
+            c_old = c
+        
+        return {
+            "root": c,
+            "iterations": max_iter,
+            "final_error": error,
+            "iteration_data": self.iteration_data,
+            "method": "Regula Falsi Method",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def secant_method(self, func_str: str, x0: float, x1: float, 
+                     tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """
+        Secant Method: Uses secant line through two points to approximate root
+        """
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        f0 = func(x0)
+        f1 = func(x1)
+        
+        for i in range(1, max_iter + 1):
+            if abs(f1 - f0) < 1e-12:
+                return {"error": "Division by zero: f(x1) - f(x0) too small"}
+            
+            x2 = x1 - f1 * (x1 - x0) / (f1 - f0)
+            f2 = func(x2)
+            error = abs(x2 - x1)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "x0": x0,
+                "x1": x1,
+                "x2": x2,
+                "f(x2)": f2,
+                "error": error
+            })
+            
+            if abs(f2) < tol or error < tol:
+                return {
+                    "root": x2,
+                    "iterations": i,
+                    "final_error": error,
+                    "iteration_data": self.iteration_data,
+                    "method": "Secant Method"
+                }
+            
+            x0, f0 = x1, f1
+            x1, f1 = x2, f2
+        
+        return {
+            "root": x2,
+            "iterations": max_iter,
+            "final_error": error,
+            "iteration_data": self.iteration_data,
+            "method": "Secant Method",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def newton_raphson_method(self, func_str: str, x0: float, 
+                             tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """
+        Newton-Raphson Method: Uses tangent line at point to approximate root
+        Requires derivative
+        """
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        # Calculate derivative
+        derivative_expr = sp.diff(expr, self.x)
+        derivative = sp.lambdify(self.x, derivative_expr, 'math')
+        
+        x = x0
+        
+        for i in range(1, max_iter + 1):
+            fx = func(x)
+            dfx = derivative(x)
+            
+            if abs(dfx) < 1e-12:
+                return {"error": "Derivative too small, division by zero"}
+            
+            x_new = x - fx / dfx
+            error = abs(x_new - x)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "x": x,
+                "f(x)": fx,
+                "f'(x)": dfx,
+                "x_new": x_new,
+                "error": error
+            })
+            
+            if abs(func(x_new)) < tol or error < tol:
+                return {
+                    "root": x_new,
+                    "iterations": i,
+                    "final_error": error,
+                    "iteration_data": self.iteration_data,
+                    "method": "Newton-Raphson Method"
+                }
+            
+            x = x_new
+        
+        return {
+            "root": x,
+            "iterations": max_iter,
+            "final_error": error,
+            "iteration_data": self.iteration_data,
+            "method": "Newton-Raphson Method",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def fixed_point_iteration(self, func_str: str, x0: float, 
+                             tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """
+        Fixed Point Iteration: Rearrange f(x) = 0 to x = g(x) and iterate
+        User must provide function in form x = g(x)
+        """
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        x = x0
+        
+        for i in range(1, max_iter + 1):
+            x_new = func(x)
+            error = abs(x_new - x)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "x": x,
+                "g(x)": x_new,
+                "error": error
+            })
+            
+            if error < tol:
+                return {
+                    "root": x_new,
+                    "iterations": i,
+                    "final_error": error,
+                    "iteration_data": self.iteration_data,
+                    "method": "Fixed Point Iteration"
+                }
+            
+            # Check for divergence
+            if abs(x_new) > 1e10:
+                return {"error": "Method diverging, |x| > 10^10"}
+            
+            x = x_new
+        
+        return {
+            "root": x,
+            "iterations": max_iter,
+            "final_error": error,
+            "iteration_data": self.iteration_data,
+            "method": "Fixed Point Iteration",
+            "warning": "Maximum iterations reached"
+        }
+    
+    def modified_secant_method(self, func_str: str, x0: float, delta: float = 0.01, 
+                               tol: float = 1e-6, max_iter: int = 100) -> Dict:
+        """
+        Modified Secant Method: Uses perturbation to approximate derivative
+        """
+        func, expr = self.parse_function(func_str)
+        self.iteration_data = []
+        
+        x = x0
+        
+        for i in range(1, max_iter + 1):
+            fx = func(x)
+            fx_delta = func(x + delta * x) if x != 0 else func(x + delta)
+            
+            denominator = fx_delta - fx
+            if abs(denominator) < 1e-12:
+                return {"error": "Division by zero: f(x + δx) - f(x) too small"}
+            
+            x_new = x - fx * (delta * x if x != 0 else delta) / denominator
+            error = abs(x_new - x)
+            
+            self.iteration_data.append({
+                "iteration": i,
+                "x": x,
+                "f(x)": fx,
+                "f(x+δx)": fx_delta,
+                "x_new": x_new,
+                "error": error
+            })
+            
+            if abs(func(x_new)) < tol or error < tol:
+                return {
+                    "root": x_new,
+                    "iterations": i,
+                    "final_error": error,
+                    "iteration_data": self.iteration_data,
+                    "method": "Modified Secant Method"
+                }
+            
+            x = x_new
+        
+        return {
+            "root": x,
+            "iterations": max_iter,
+            "final_error": error,
+            "iteration_data": self.iteration_data,
+            "method": "Modified Secant Method",
+            "warning": "Maximum iterations reached"
+        }
 
-        tol = float_input("Tolerance (default 1e-6): ", default=1e-6)
-        max_iter = int_input("Max iterations (default 50): ", default=50)
 
-        try:
-            if choice == '1':  # Bisection
-                a = float_input("Left endpoint a: ")
-                b = float_input("Right endpoint b: ")
-                iters, root, fval, err, nit = bisection(f,a,b,tol,max_iter)
-                print_bisection_table(iters)
-                print(f"\nEstimated root: {root}\nf(root): {fval}\nFinal error estimate: {err}\nIterations: {nit}")
+def display_results(result: Dict):
+    """Display results in a formatted way"""
+    print("\n" + "="*70)
+    print(f"Method: {result.get('method', 'Unknown')}")
+    print("="*70)
+    
+    if "error" in result:
+        print(f"\nError: {result['error']}")
+        return
+    
+    print("\nIteration Details:")
+    print("-"*70)
+    
+    # Display iteration data
+    if result.get('iteration_data'):
+        first_iter = result['iteration_data'][0]
+        headers = list(first_iter.keys())
+        
+        # Print headers
+        header_line = " | ".join(f"{h:>12}" for h in headers)
+        print(header_line)
+        print("-"*70)
+        
+        # Print data
+        for data in result['iteration_data']:
+            values = []
+            for key in headers:
+                val = data[key]
+                if isinstance(val, (int,)):
+                    values.append(f"{val:>12}")
+                elif isinstance(val, (float,)):
+                    values.append(f"{val:>12.6e}")
+                else:
+                    values.append(f"{str(val):>12}")
+            print(" | ".join(values))
+    
+    print("-"*70)
+    print(f"\nFinal Root: {result['root']:.10f}")
+    print(f"Final Error: {result['final_error']:.6e}")
+    print(f"Iterations: {result['iterations']}")
+    
+    if "warning" in result:
+        print(f"\nWarning: {result['warning']}")
+    
+    print("="*70 + "\n")
 
-            elif choice == '2':  # Regula Falsi
-                a = float_input("Left endpoint a: ")
-                b = float_input("Right endpoint b: ")
-                iters, root, fval, err, nit = regula_falsi(f,a,b,tol,max_iter)
-                print_regula_table(iters)
-                print(f"\nEstimated root: {root}\nf(root): {fval}\nFinal error estimate: {err}\nIterations: {nit}")
 
-            elif choice == '3':  # Secant
-                x0 = float_input("x0: ")
-                x1 = float_input("x1: ")
-                iters, root, fval, err, nit = secant(f,x0,x1,tol,max_iter)
-                print_secant_table(iters)
-                print(f"\nEstimated root: {root}\nf(root): {fval}\nFinal error estimate: {err}\nIterations: {nit}")
+def main():
+    """Main CLI function"""
+    solver = ZOFSolver()
+    
+    print("\n" + "="*70)
+    print(" "*15 + "ZERO OF FUNCTIONS (ZOF) SOLVER")
+    print("="*70)
+    
+    methods = {
+        "1": "Bisection Method",
+        "2": "Regula Falsi Method",
+        "3": "Secant Method",
+        "4": "Newton-Raphson Method",
+        "5": "Fixed Point Iteration",
+        "6": "Modified Secant Method"
+    }
+    
+    print("\nAvailable Methods:")
+    for key, method in methods.items():
+        print(f"  {key}. {method}")
+    
+    choice = input("\nSelect method (1-6): ").strip()
+    
+    if choice not in methods:
+        print("Invalid choice!")
+        return
+    
+    print(f"\nYou selected: {methods[choice]}")
+    print("\nNote: Enter functions using Python syntax")
+    print("Examples: x**2 - 4, sin(x) - x/2, exp(x) - 3*x")
+    
+    func_str = input("\nEnter function f(x): ").strip()
+    
+    try:
+        if choice == "1":  # Bisection
+            a = float(input("Enter left endpoint (a): "))
+            b = float(input("Enter right endpoint (b): "))
+            tol = float(input("Enter tolerance (default 1e-6): ") or 1e-6)
+            max_iter = int(input("Enter max iterations (default 100): ") or 100)
+            result = solver.bisection_method(func_str, a, b, tol, max_iter)
+        
+        elif choice == "2":  # Regula Falsi
+            a = float(input("Enter left endpoint (a): "))
+            b = float(input("Enter right endpoint (b): "))
+            tol = float(input("Enter tolerance (default 1e-6): ") or 1e-6)
+            max_iter = int(input("Enter max iterations (default 100): ") or 100)
+            result = solver.regula_falsi_method(func_str, a, b, tol, max_iter)
+        
+        elif choice == "3":  # Secant
+            x0 = float(input("Enter first initial guess (x0): "))
+            x1 = float(input("Enter second initial guess (x1): "))
+            tol = float(input("Enter tolerance (default 1e-6): ") or 1e-6)
+            max_iter = int(input("Enter max iterations (default 100): ") or 100)
+            result = solver.secant_method(func_str, x0, x1, tol, max_iter)
+        
+        elif choice == "4":  # Newton-Raphson
+            x0 = float(input("Enter initial guess (x0): "))
+            tol = float(input("Enter tolerance (default 1e-6): ") or 1e-6)
+            max_iter = int(input("Enter max iterations (default 100): ") or 100)
+            result = solver.newton_raphson_method(func_str, x0, tol, max_iter)
+        
+        elif choice == "5":  # Fixed Point
+            print("\nNote: Enter function in form g(x) where x = g(x)")
+            print("Example: For x^2 - 4 = 0, use sqrt(4) or (x+4/x)/2")
+            func_str = input("Enter function g(x): ").strip()
+            x0 = float(input("Enter initial guess (x0): "))
+            tol = float(input("Enter tolerance (default 1e-6): ") or 1e-6)
+            max_iter = int(input("Enter max iterations (default 100): ") or 100)
+            result = solver.fixed_point_iteration(func_str, x0, tol, max_iter)
+        
+        elif choice == "6":  # Modified Secant
+            x0 = float(input("Enter initial guess (x0): "))
+            delta = float(input("Enter perturbation δ (default 0.01): ") or 0.01)
+            tol = float(input("Enter tolerance (default 1e-6): ") or 1e-6)
+            max_iter = int(input("Enter max iterations (default 100): ") or 100)
+            result = solver.modified_secant_method(func_str, x0, delta, tol, max_iter)
+        
+        display_results(result)
+        
+    except ValueError as e:
+        print(f"\nError: {e}")
+    except Exception as e:
+        print(f"\nUnexpected error: {e}")
+    
+    # Ask if user wants to continue
+    again = input("\nWould you like to solve another equation? (y/n): ").strip().lower()
+    if again == 'y':
+        main()
 
-            elif choice == '4':  # Newton-Raphson
-                fprime_callable, dexpr = derivative_of(expr)
-                x0 = float_input("Initial guess x0: ")
-                iters, root, fval, err, nit = newton_raphson(f, fprime_callable, x0, tol, max_iter)
-                print_newton_table(iters)
-                print(f"\nEstimated root: {root}\nf(root): {fval}\nFinal error estimate: {err}\nIterations: {nit}")
-
-            elif choice == '5':  # Fixed Point
-                g_str = input("Enter g(x) for x = g(x) (required): ").strip()
-                try:
-                    g, gexpr = make_function(g_str)
-                except Exception as e:
-                    print("Error parsing g(x):", e)
-                    continue
-                x0 = float_input("Initial guess x0: ")
-                iters, root, err, nit = fixed_point_iteration(g,x0,tol,max_iter)
-                print_fixed_table(iters)
-                print(f"\nEstimated fixed point: {root}\nFinal error estimate: {err}\nIterations: {nit}")
-
-            elif choice == '6':  # Modified Secant
-                x0 = float_input("Initial guess x0: ")
-                delta = float_input("Delta (relative perturbation, e.g. 1e-3): ", default=1e-3)
-                iters, root, fval, err, nit = modified_secant(f,x0,delta,tol,max_iter)
-                print_modified_secant_table(iters)
-                print(f"\nEstimated root: {root}\nf(root): {fval}\nFinal error estimate: {err}\nIterations: {nit}")
-
-        except Exception as e:
-            print("Method failed with error:", e)
 
 if __name__ == "__main__":
-    run_cli()
+    main()
